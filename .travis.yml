@@ -1,21 +1,43 @@
----
-language: java
-addons:
-  apt:
-    packages:
-    # http://packages.ubuntu.com/precise/ping
-    # Commented out inetutils-ping because it's not in the whitelist
-    # https://github.com/travis-ci/apt-package-whitelist/pull/966
-    #- inetutils-ping
-# http://stackoverflow.com/questions/14694139/how-to-resolve-dependencies-between-modules-within-multi-module-project
-install: mvn compile org.apache.maven.plugins:maven-dependency-plugin:2.10:go-offline --batch-mode --show-version
-script:
-  # add our bin folder to the PATH so our fake ping will be picked up when running under Travis CI
-  # Inspiration: https://github.com/nono/cozy-desktop/commit/26ab9df277d1cbf781e9e476d022988ab0113154
-  - export PATH="bin:$PATH"
-  # We can't add '--offline' below because the dependency plugin misses some of the dependencies
-  - mvn clean verify --batch-mode
-# https://docs.travis-ci.com/user/migrating-from-legacy/
-sudo: false
+addons: {}
+after_success:
+- unset JAVA_TOOL_OPTIONS
+- mvn test -Djacoco.skip=true -Dcobertura.skip=true -Dmaven.clover.skip=true
+- ./df-build.sh
+- env > env.file
+- curl -sL https://raw.githubusercontent.com/travis-ci/artifacts/master/install |
+  bash
+- artifacts upload --key $AWS_ACCESS_KEY_ID --secret $AWS_SECRET_ACCESS_KEY --bucket
+  $DFB_AWS_BUCKET --target-paths $DFB_AWS_BUILD_PATH $(git ls-files -oi -x *.exec)
+- artifacts upload --key $AWS_ACCESS_KEY_ID --secret $AWS_SECRET_ACCESS_KEY --bucket
+  $DFB_AWS_BUCKET --target-paths $DFB_AWS_BUILD_PATH ${DFB_PROJECT_DIR}/env.file
+before_install:
+- wget -O beforebuild.sh $DFB_AGENTS_URL/beforebuild.sh
+- chmod a+x beforebuild.sh
+- ./beforebuild.sh
+env:
+  global:
+  - DFB_PROJECT_DIR=$(pwd)
+  - TMP_PROJECT_PARENT_DIR=$(dirname $DFB_PROJECT_DIR)
+  - DFB_BUILD_ID=$TRAVIS_BUILD_ID
+  - DFB_PRODUCT_NAME=$(basename $DFB_PROJECT_DIR)
+  - DFB_OWNER_NAME=$(basename $TMP_PROJECT_PARENT_DIR)
+  - DFB_PRODUCT_KEY=${DFB_OWNER_NAME}_${DFB_PRODUCT_NAME}
+  - DFB_AWS_BUCKET=aline-external-ci-artifacts
+  - DFB_AGENTS_URL=https://s3.amazonaws.com/${DFB_AWS_BUCKET}/agents
+  - DFB_PACKAGING_URL=s3://${DFB_AWS_BUCKET}/artifacts/travis/
+  - DFB_AWS_BUILD_PATH=/artifacts/travis/${DFB_PRODUCT_KEY}/${DFB_BUILD_ID}/output/
+  - AWS_ACCESS_KEY_ID=AKIAIIU2LBOCCKXAIFZQ
+  - AWS_SECRET_ACCESS_KEY=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
+  - DFB_JTO=-javaagent:dfbuild-agent.jar=PACKAGING_BASE_URI=$DFB_PACKAGING_URL,PRODUCT_KEY=$DFB_PRODUCT_KEY/,BUILD_KEY=$DFB_BUILD_ID/,MODULES_KEY=modules/,START_TIME=0,BUILD_BASE_DIR=$DFB_PROJECT_DIR
+install: mvn compile org.apache.maven.plugins:maven-dependency-plugin:2.10:go-offline
+  --batch-mode --show-version
 jdk:
-  - openjdk6
+- openjdk6
+language: java
+notifications: {}
+script:
+- export JAVA_TOOL_OPTIONS=$DFB_JTO
+- export PATH="bin:$PATH"
+- mvn clean verify --batch-mode -Djacoco.skip=true -Dcobertura.skip=true -Dmaven.clover.skip=true
+sudo: false
+# Modified by IntegrationTestInstrumentation at 2016-05-07 20:40:42.677847
